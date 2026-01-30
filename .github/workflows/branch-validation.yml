@@ -1,0 +1,74 @@
+name: Branch Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  validate-branch:
+    name: Validate Branch Name & Target
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch naming convention
+        run: |
+          BRANCH_NAME="${GITHUB_HEAD_REF}"
+          PATTERN="^(feature|bugfix|hotfix|patch|refactor|chore|wip)/[A-Z]+-[a-z0-9-]+$"
+
+          # Skip validation for protected branches (development, uat, main)
+          if [[ "$BRANCH_NAME" =~ ^(development|uat|main)$ ]]; then
+            echo "Protected branch, skipping name validation"
+            exit 0
+          fi
+
+          if [[ ! "$BRANCH_NAME" =~ $PATTERN ]]; then
+            echo "::error::Branch name '$BRANCH_NAME' does not match pattern: <type>/<TICKET>-description"
+            echo "Valid types: feature, bugfix, hotfix, patch, refactor, chore, wip"
+            echo "Example: feature/[A-Z]+-123-add-login"
+            exit 1
+          fi
+
+          echo "Branch name is valid: $BRANCH_NAME"
+
+      - name: Validate PR target branch
+        run: |
+          SOURCE="${GITHUB_HEAD_REF}"
+          TARGET="${GITHUB_BASE_REF}"
+
+          echo "Source: $SOURCE -> Target: $TARGET"
+
+          # Extract branch type
+          BRANCH_TYPE=$(echo "$SOURCE" | cut -d'/' -f1)
+
+          # Define valid source->target mappings
+          case "$TARGET" in
+            "development")
+              VALID_TYPES="feature bugfix refactor chore"
+              ;;
+            "uat")
+              VALID_TYPES="development patch main"
+              ;;
+            "main")
+              VALID_TYPES="uat hotfix"
+              ;;
+            *)
+              echo "::error::Unknown target branch: $TARGET"
+              exit 1
+              ;;
+          esac
+
+          # Check if source is a protected branch name (for uat <- development, main <- uat flows)
+          if [[ "$SOURCE" =~ ^(development|uat|main)$ ]]; then
+            if [[ " $VALID_TYPES " =~ " $SOURCE " ]]; then
+              echo "Valid: $SOURCE can be merged to $TARGET"
+              exit 0
+            fi
+          fi
+
+          # Check branch type
+          if [[ " $VALID_TYPES " =~ " $BRANCH_TYPE " ]]; then
+            echo "Valid: $BRANCH_TYPE branches can be merged to $TARGET"
+          else
+            echo "::error::Branch type '$BRANCH_TYPE' cannot be merged to '$TARGET'"
+            echo "Valid source types for $TARGET: $VALID_TYPES"
+            exit 1
+          fi
